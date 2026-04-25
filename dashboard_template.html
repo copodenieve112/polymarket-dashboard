@@ -1,0 +1,957 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>polybot · dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #0d0b08;
+  --s1:        #161310;
+  --s2:        #1e1a13;
+  --s3:        #27221a;
+  --border:    rgba(196,164,107,0.11);
+  --border-hi: rgba(196,164,107,0.25);
+  --accent:    #c4a46b;
+  --accent-lo: rgba(196,164,107,0.12);
+  --text:      #e4d5b5;
+  --muted:     #6b5b3e;
+  --dim:       #2c2318;
+  --win:       #8bad65;
+  --loss:      #b86c50;
+  --mono:      'IBM Plex Mono', monospace;
+}
+
+body {
+  background: var(--bg);
+  background-image: radial-gradient(circle, rgba(196,164,107,0.07) 1px, transparent 1px);
+  background-size: 8px 8px;
+  font-family: var(--mono);
+  color: var(--text);
+  min-height: 100vh;
+  font-size: 13px;
+}
+
+::-webkit-scrollbar { width: 3px; height: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--dim); border-radius: 1px; }
+
+.seg-bar { display:flex; gap:2px; height:6px; }
+.seg-bar span { flex:1; background: var(--dim); image-rendering: pixelated; }
+.seg-bar span.on-win  { background: var(--win); }
+.seg-bar span.on-acc  { background: var(--accent); }
+.seg-bar span.on-loss { background: var(--loss); }
+
+@keyframes blink  { 0%,100%{opacity:1} 50%{opacity:0.15} }
+@keyframes fadeUp { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+@keyframes glow   { 0%,100%{box-shadow:0 0 0 1px rgba(196,164,107,0.15)} 50%{box-shadow:0 0 0 2px rgba(196,164,107,0.45)} }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+/* ── INJECTED DATA ───────────────────────────────────────── */
+const ASSETS  = __ASSETS__;
+const TFS     = ['5m', '15m', '1h'];
+const trades  = __TRADES__;
+const live    = __LIVE__;
+const KPI     = __KPI__;
+const markets = __MARKETS__;
+
+/* ── HELPERS ─────────────────────────────────────────────── */
+const fmtTime = ts => {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  const p = n => String(n).padStart(2, '0');
+  return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+};
+
+/* ── DERIVED ─────────────────────────────────────────────── */
+const pnlCurve = (() => {
+  let c = 0;
+  return trades.map(t => { c += t.payout; return { ts: t.ts, pnl: +c.toFixed(2) }; });
+})();
+
+const heatmap = (() => {
+  const g = {};
+  trades.forEach(t => {
+    const k = `${new Date(t.ts).getDay()}-${new Date(t.ts).getHours()}`;
+    if (!g[k]) g[k] = { wins: 0, total: 0, pnl: 0 };
+    g[k].total++;
+    if (t.won) g[k].wins++;
+    g[k].pnl += t.payout;
+  });
+  return g;
+})();
+
+const marketMap = (() => {
+  const m = {};
+  markets.forEach(mk => {
+    if (!m[mk.coin]) m[mk.coin] = {};
+    m[mk.coin][mk.tf] = mk;
+  });
+  return m;
+})();
+
+/* ── COIN PIXEL ART ──────────────────────────────────────── */
+const COIN_PIXELS = {
+  BTC:  [[0,1,1,1,0],[1,0,1,0,1],[0,1,1,1,0],[1,0,1,0,1],[0,1,1,1,0]],
+  ETH:  [[0,0,1,0,0],[0,1,1,1,0],[1,1,1,1,1],[0,1,1,1,0],[0,0,1,0,0]],
+  SOL:  [[1,1,1,1,1],[0,0,0,1,0],[0,0,1,0,0],[0,1,0,0,0],[1,1,1,1,1]],
+  BNB:  [[0,1,0,1,0],[1,1,1,1,1],[0,1,1,1,0],[1,1,1,1,1],[0,1,0,1,0]],
+  XRP:  [[1,0,0,0,1],[0,1,0,1,0],[0,0,1,0,0],[0,1,0,1,0],[1,0,0,0,1]],
+  DOGE: [[0,1,1,0,0],[1,0,0,1,0],[1,1,1,0,1],[1,0,0,1,0],[0,1,1,0,0]],
+  HYPE: [[1,0,0,0,1],[1,0,0,0,1],[1,1,1,1,1],[1,0,0,0,1],[1,0,0,0,1]],
+};
+
+function CoinIcon({ asset, size = 10, color }) {
+  const px = COIN_PIXELS[asset] || COIN_PIXELS.BTC;
+  const c  = color || 'var(--accent)';
+  return (
+    <svg width={size} height={size} viewBox="0 0 5 5"
+         style={{ imageRendering: 'pixelated', flexShrink: 0 }}
+         shapeRendering="crispEdges">
+      {px.map((row, y) => row.map((on, x) =>
+        on ? <rect key={`${x}-${y}`} x={x} y={y} width={1} height={1} fill={c} /> : null
+      ))}
+    </svg>
+  );
+}
+
+/* ── STEP CHART ──────────────────────────────────────────── */
+function StepChart({ data, W = 560, H = 148 }) {
+  if (!data || data.length < 2) {
+    return (
+      <div style={{ height: H, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: 'var(--muted)', fontSize: 11 }}>
+        Sin trades cerrados aún
+      </div>
+    );
+  }
+  const pad = { t: 14, r: 8, b: 26, l: 46 };
+  const iW = W - pad.l - pad.r, iH = H - pad.t - pad.b;
+  const vals = data.map(d => d.pnl);
+  const minV = Math.min(...vals), maxV = Math.max(...vals);
+  const range = maxV - minV || 1;
+  const sc = v => pad.t + iH - (v - minV) / range * iH;
+  const sx = i => pad.l + i / (data.length - 1) * iW;
+
+  let d = `M${sx(0).toFixed(0)},${sc(data[0].pnl).toFixed(0)}`;
+  for (let i = 1; i < data.length; i++) {
+    d += ` H${sx(i).toFixed(0)} V${sc(data[i].pnl).toFixed(0)}`;
+  }
+  const fillD = d + ` V${(pad.t + iH).toFixed(0)} H${pad.l} Z`;
+  const last   = vals[vals.length - 1];
+  const stroke = last >= 0 ? 'var(--win)' : 'var(--loss)';
+  const ticks  = 4;
+  const showZero = minV < 0 && maxV > 0;
+  const labelIdxs = [0, Math.floor(data.length * 0.25), Math.floor(data.length * 0.5),
+                     Math.floor(data.length * 0.75), data.length - 1];
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`}
+         style={{ width: '100%', height: 'auto', display: 'block', imageRendering: 'pixelated' }}
+         shapeRendering="crispEdges">
+      <defs>
+        <linearGradient id="sg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%"   stopColor={stroke} stopOpacity="0.18" />
+          <stop offset="100%" stopColor={stroke} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      {Array.from({ length: ticks + 1 }, (_, i) => {
+        const v = minV + range / ticks * i;
+        const y = Math.round(sc(v));
+        return (
+          <g key={i}>
+            <line x1={pad.l} y1={y} x2={pad.l + iW} y2={y}
+                  stroke="var(--border)" strokeWidth="1" />
+            <text x={pad.l - 5} y={y + 4} textAnchor="end"
+                  fill="var(--muted)" fontSize="8" fontFamily="IBM Plex Mono">
+              {v >= 0 ? '+' : ''}{v.toFixed(0)}
+            </text>
+          </g>
+        );
+      })}
+      {showZero && (
+        <line x1={pad.l} y1={Math.round(sc(0))} x2={pad.l + iW} y2={Math.round(sc(0))}
+              stroke="rgba(196,164,107,0.2)" strokeWidth="1" strokeDasharray="4,4" />
+      )}
+      <path d={fillD} fill="url(#sg)" shapeRendering="crispEdges" />
+      <path d={d}     fill="none" stroke={stroke} strokeWidth="1.5" shapeRendering="crispEdges" />
+      {labelIdxs.map(i => {
+        const dt  = new Date(data[i].ts);
+        const lbl = dt.toLocaleDateString('es', { month: 'short', day: 'numeric' });
+        return (
+          <text key={i} x={Math.round(sx(i))} y={H - 4} textAnchor="middle"
+                fill="var(--muted)" fontSize="8" fontFamily="IBM Plex Mono">{lbl}</text>
+        );
+      })}
+      <rect x={Math.round(sx(data.length - 1)) - 2} y={Math.round(sc(last)) - 2}
+            width="4" height="4" fill={stroke} />
+    </svg>
+  );
+}
+
+/* ── SEGMENTED BAR ───────────────────────────────────────── */
+function SegBar({ ratio, variant = 'win', total = 12 }) {
+  const filled = Math.round(ratio * total);
+  return (
+    <div className="seg-bar">
+      {Array.from({ length: total }, (_, i) =>
+        <span key={i} className={i < filled ? `on-${variant}` : ''} />
+      )}
+    </div>
+  );
+}
+
+/* ── FRESHNESS DOT color based on API updatedAt age ─────── */
+function freshnessColor(updatedAtMs, hasRealPrice) {
+  if (!hasRealPrice) return 'var(--muted)';
+  if (!updatedAtMs) return 'var(--muted)';
+  const ageS = (Date.now() - updatedAtMs) / 1000;
+  if (ageS < 30)  return 'var(--win)';
+  if (ageS < 120) return 'var(--accent)';
+  return 'var(--loss)';
+}
+
+/* ── LIVE COUNTDOWN TIMER ────────────────────────────────── */
+function LiveTimer({ init }) {
+  const [s, setS] = useState(init);
+  useEffect(() => {
+    const iv = setInterval(() => setS(x => Math.max(0, x - 1)), 1000);
+    return () => clearInterval(iv);
+  }, []);
+  const m = Math.floor(s / 60), sec = s % 60;
+  const urgent = s < 45 && s > 0;
+  return (
+    <span style={{
+      color:      s === 0 ? 'var(--muted)' : urgent ? 'var(--accent)' : 'var(--text)',
+      fontSize:   12,
+      animation:  urgent ? 'blink 1s steps(1) infinite' : 'none',
+      fontWeight: urgent ? 600 : 400,
+    }}>
+      {m}:{sec.toString().padStart(2, '0')}
+    </span>
+  );
+}
+
+/* ── HEATMAP ─────────────────────────────────────────────── */
+function Heatmap({ data }) {
+  const days  = ['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sa'];
+  const hours = Array.from({ length: 24 }, (_, i) => i);
+  const pnls  = Object.values(data).map(v => v.pnl);
+  const maxAbs = Math.max(...pnls.map(Math.abs), 1);
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '20px repeat(24,1fr)', gap: 2, minWidth: 520 }}>
+        <div />
+        {hours.map(h =>
+          <div key={h} style={{ fontSize: 7, textAlign: 'center', color: 'var(--muted)' }}>{h}</div>
+        )}
+        {days.map((day, di) =>
+          <React.Fragment key={di}>
+            <div style={{ fontSize: 8, color: 'var(--muted)', display: 'flex',
+                          alignItems: 'center', justifyContent: 'center' }}>{day}</div>
+            {hours.map(h => {
+              const cell = data[`${di}-${h}`];
+              if (!cell) return (
+                <div key={h} style={{ height: 12, background: 'var(--dim)', imageRendering: 'pixelated' }} />
+              );
+              const intensity = cell.pnl / maxAbs;
+              const bg = cell.pnl >= 0
+                ? `rgba(139,173,101,${0.08 + Math.abs(intensity) * 0.72})`
+                : `rgba(184,108,80,${0.08 + Math.abs(intensity) * 0.72})`;
+              return (
+                <div key={h} title={`${day} ${h}h · $${cell.pnl.toFixed(1)}`}
+                     style={{ height: 12, background: bg, imageRendering: 'pixelated', cursor: 'default' }} />
+              );
+            })}
+          </React.Fragment>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── SECTION LABEL ───────────────────────────────────────── */
+function SectionLabel({ children }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+      <div style={{ width: 2, height: 10, background: 'var(--accent)',
+                    flexShrink: 0, imageRendering: 'pixelated' }} />
+      <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase',
+                     letterSpacing: '0.12em', fontWeight: 500 }}>{children}</span>
+    </div>
+  );
+}
+
+/* ── PIXEL CORNER CARD ───────────────────────────────────── */
+function Card({ children, style = {} }) {
+  const c = { position: 'absolute', width: 4, height: 4, background: 'var(--accent)', opacity: 0.6 };
+  return (
+    <div style={{
+      background: 'var(--s1)', border: '1px solid var(--border)',
+      padding: '18px 20px', position: 'relative',
+      boxShadow: '0 0 0 1px rgba(196,164,107,0.06), 0 8px 40px rgba(0,0,0,0.6)',
+      ...style,
+    }}>
+      <div style={{ ...c, top: -1, left: -1 }} />
+      <div style={{ ...c, top: -1, right: -1 }} />
+      <div style={{ ...c, bottom: -1, left: -1 }} />
+      <div style={{ ...c, bottom: -1, right: -1 }} />
+      {children}
+    </div>
+  );
+}
+
+/* ── MARKET CELL ─────────────────────────────────────────── */
+function MarketCell({ m }) {
+  const [secs, setSecs] = useState(m.time_left_secs);
+  useEffect(() => {
+    const iv = setInterval(() => setSecs(x => Math.max(0, x - 1)), 1000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const inEntry = secs > 0 && secs <= 60;
+  const closed  = secs === 0;
+
+  const timeStr = closed       ? 'CLOSED'
+    : secs < 60   ? `${secs}s`
+    : secs < 3600 ? `${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2,'0')}s`
+    : `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`;
+
+  const spark  = m.sparkline || [m.price_yes];
+  const sMin   = Math.min(...spark) - 0.005;
+  const sMax   = Math.max(...spark) + 0.005;
+  const sRange = sMax - sMin || 0.01;
+  const SW = 100, SH = 10;
+  const sy = v => SH - 1 - Math.round((v - sMin) / sRange * (SH - 2));
+
+  return (
+    <div style={{
+      background:    m.active_bet ? 'var(--s2)' : 'var(--s1)',
+      border:        `1px solid ${m.active_bet ? 'var(--border-hi)' : inEntry ? 'rgba(196,164,107,0.2)' : 'var(--border)'}`,
+      padding:       '8px 9px',
+      position:      'relative',
+      animation:     inEntry ? 'glow 1.5s ease-in-out infinite' : 'none',
+    }}>
+      {/* freshness dot: green=<30s, amber=30-120s, red=>120s, gray=no real price */}
+      <div style={{
+        position: 'absolute', top: 5, right: 5,
+        width: 3, height: 3, imageRendering: 'pixelated',
+        background: freshnessColor(m.updated_at_ms, m.has_real_price),
+      }} title={m.updated_at_ms ? `API upd: ${new Date(m.updated_at_ms).toISOString().slice(11,19)} UTC` : 'sin precio real'} />
+
+      {/* active bet corner */}
+      {m.active_bet && (
+        <div style={{
+          position: 'absolute', top: -1, left: -1,
+          width: 4, height: 4, background: 'var(--accent)', opacity: 0.9,
+        }} />
+      )}
+
+      {/* YES / bar / NO */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3 }}>
+        <span style={{ fontSize: 8, color: 'var(--win)', fontWeight: 700,
+                       minWidth: 28, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+          {(m.price_yes * 100).toFixed(1)}
+        </span>
+        <div style={{ flex: 1, height: 5, background: 'var(--dim)', overflow: 'hidden', position: 'relative' }}>
+          <div style={{
+            position: 'absolute', left: 0, top: 0, height: '100%',
+            width: `${m.price_yes * 100}%`,
+            background: 'var(--win)', imageRendering: 'pixelated',
+          }} />
+        </div>
+        <span style={{ fontSize: 8, color: 'var(--loss)', fontWeight: 700,
+                       minWidth: 28, fontVariantNumeric: 'tabular-nums' }}>
+          {(m.price_no * 100).toFixed(1)}
+        </span>
+      </div>
+
+      {/* sparkline */}
+      {spark.length > 1 && (
+        <svg width="100%" height={SH} viewBox={`0 0 ${SW} ${SH}`}
+             preserveAspectRatio="none" shapeRendering="crispEdges"
+             style={{ display: 'block', marginBottom: 3 }}>
+          {spark.map((v, i) => {
+            if (i === 0) return null;
+            const x1 = Math.round((i - 1) / (spark.length - 1) * SW);
+            const x2 = Math.round(i       / (spark.length - 1) * SW);
+            return (
+              <line key={i} x1={x1} y1={sy(spark[i-1])} x2={x2} y2={sy(v)}
+                    stroke="var(--accent)" strokeWidth="1" opacity="0.4" />
+            );
+          })}
+        </svg>
+      )}
+
+      {/* time to expiry */}
+      <div style={{
+        fontSize: 8, textAlign: 'center', fontVariantNumeric: 'tabular-nums',
+        fontWeight: inEntry ? 700 : 500,
+        color:  closed ? 'var(--muted)' : inEntry ? 'var(--accent)' : 'var(--text)',
+        animation: inEntry ? 'blink 1s steps(1) infinite' : 'none',
+        letterSpacing: '0.02em',
+      }}>
+        {timeStr}
+      </div>
+
+      {/* active bet tag */}
+      {m.active_bet && (
+        <div style={{ fontSize: 7, textAlign: 'center', color: 'var(--accent)',
+                      marginTop: 2, letterSpacing: '0.06em', fontWeight: 600 }}>
+          ● BET
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── APP ─────────────────────────────────────────────────── */
+function App() {
+  const [clock, setClock] = useState(new Date());
+  useEffect(() => {
+    const iv = setInterval(() => setClock(new Date()), 1000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const totalPnl    = KPI.total_pnl;
+  const totalTrades = trades.length;
+  const capChange   = KPI.capital_initial > 0
+    ? (KPI.capital_current - KPI.capital_initial) / KPI.capital_initial * 100
+    : 0;
+  const allFresh = KPI.n_fresh === KPI.n_markets && KPI.n_markets > 0;
+
+  const assetStats = ASSETS.map(a => {
+    const ts = trades.filter(t => t.asset === a);
+    const w  = ts.filter(t => t.won).length;
+    return { asset: a, wins: w, total: ts.length, pnl: ts.reduce((s, t) => s + t.payout, 0) };
+  }).filter(a => a.total > 0);
+
+  const tfStats = TFS.map(tf => {
+    const ts = trades.filter(t => t.tf === tf);
+    const w  = ts.filter(t => t.won).length;
+    return {
+      tf, wins: w, total: ts.length,
+      pnl:    ts.reduce((s, t) => s + t.payout, 0),
+      avgSbc: ts.length ? ts.reduce((s, t) => s + t.sbc, 0) / ts.length : 0,
+    };
+  }).filter(tf => tf.total > 0);
+
+  return (
+    <div style={{ minHeight: '100vh', padding: '0 0 40px 0' }}>
+
+      {/* ── HEADER ── */}
+      <div style={{
+        borderBottom: '1px solid var(--border)', padding: '0 28px',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        height: 48, background: 'var(--s1)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+          {/* pixel hex logo */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <svg width="16" height="16" viewBox="0 0 7 7"
+                 shapeRendering="crispEdges" style={{ imageRendering: 'pixelated' }}>
+              {[[0,1,1,1,1,1,0],[1,1,0,1,0,1,1],[1,0,1,1,1,0,1],
+                [1,1,0,0,0,1,1],[1,0,1,1,1,0,1],[1,1,0,1,0,1,1],[0,1,1,1,1,1,0]]
+                .map((row, y) => row.map((on, x) =>
+                  on ? <rect key={`${x}-${y}`} x={x} y={y} width={1} height={1} fill="var(--accent)" /> : null
+                ))}
+            </svg>
+            <span style={{ fontWeight: 600, fontSize: 14, letterSpacing: '0.02em', color: 'var(--text)' }}>
+              polybot
+            </span>
+          </div>
+          {/* live dot */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <svg width="8" height="8" viewBox="0 0 2 2" shapeRendering="crispEdges"
+                 style={{ imageRendering: 'pixelated', animation: 'blink 2s steps(1) infinite' }}>
+              <rect width="2" height="2" fill="var(--win)" />
+            </svg>
+            <span style={{ fontSize: 10, color: 'var(--win)', letterSpacing: '0.08em' }}>LIVE</span>
+          </div>
+          {/* api status */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{
+              width: 4, height: 4, imageRendering: 'pixelated',
+              background: allFresh ? 'var(--win)' : 'var(--loss)',
+            }} />
+            <span style={{ fontSize: 9, letterSpacing: '0.06em',
+                           color: allFresh ? 'var(--win)' : 'var(--loss)' }}>
+              API {KPI.n_fresh}/{KPI.n_markets}
+            </span>
+          </div>
+          {/* demo badge */}
+          <span style={{ fontSize: 8, color: 'var(--muted)', letterSpacing: '0.1em',
+                         border: '1px solid var(--border)', padding: '2px 6px' }}>
+            DEMO · PAPER TRADING
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+          <span style={{ fontSize: 10, color: 'var(--muted)' }}>{live.length} posiciones activas</span>
+          <span style={{ fontSize: 10, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
+            {clock.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+          </span>
+        </div>
+      </div>
+
+      <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+        {/* ── KPI BAR (7 cols) ── */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 0,
+          background: 'var(--s1)', border: '1px solid var(--border)', position: 'relative',
+          boxShadow: '0 0 0 1px rgba(196,164,107,0.06), 0 8px 40px rgba(0,0,0,0.6)',
+        }}>
+          {[[-1,-1,'tl'],[-1,null,'tr'],[null,-1,'bl'],[null,null,'br']].map(([t,l,k]) => (
+            <div key={k} style={{
+              position: 'absolute',
+              top:    t != null ? t : undefined,
+              bottom: t == null ? -1 : undefined,
+              left:   l != null ? l : undefined,
+              right:  l == null ? -1 : undefined,
+              width: 4, height: 4, background: 'var(--accent)', opacity: 0.6,
+            }} />
+          ))}
+          {[
+            { label: 'capital inicial',
+              val:   `$${KPI.capital_initial.toFixed(0)}`,
+              sub:   'paper trading',
+              color: 'var(--muted)' },
+            { label: 'capital actual',
+              val:   `$${KPI.capital_current.toFixed(2)}`,
+              sub:   `${capChange >= 0 ? '+' : ''}${capChange.toFixed(2)}%`,
+              color: KPI.capital_current >= KPI.capital_initial ? 'var(--win)' : 'var(--loss)' },
+            { label: 'pnl hoy',
+              val:   `${KPI.today_pnl >= 0 ? '+' : ''}$${KPI.today_pnl.toFixed(2)}`,
+              sub:   'retorno diario',
+              color: KPI.today_pnl >= 0 ? 'var(--win)' : KPI.today_pnl < 0 ? 'var(--loss)' : 'var(--muted)' },
+            { label: 'pnl total',
+              val:   `${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(2)}`,
+              sub:   `${totalTrades} trades`,
+              color: totalPnl >= 0 ? 'var(--win)' : 'var(--loss)' },
+            { label: 'win rate',
+              val:   `${KPI.win_rate.toFixed(1)}%`,
+              sub:   `${KPI.wins}W · ${totalTrades - KPI.wins}L`,
+              color: KPI.win_rate >= 55 ? 'var(--win)' : KPI.win_rate >= 50 ? 'var(--text)' : 'var(--loss)' },
+            { label: 'roi',
+              val:   `${KPI.roi >= 0 ? '+' : ''}${KPI.roi.toFixed(1)}%`,
+              sub:   'sobre capital total',
+              color: KPI.roi >= 0 ? 'var(--win)' : 'var(--loss)' },
+            { label: 'activas ahora',
+              val:   live.length,
+              sub:   `${live.filter(p => p.secsLeft < 60).length} cierran pronto`,
+              color: 'var(--accent)' },
+          ].map((kpi, i) => (
+            <div key={i} style={{
+              padding: '11px 14px',
+              borderRight: i < 6 ? '1px solid var(--border)' : 'none',
+            }}>
+              <div style={{ fontSize: 8, color: 'var(--muted)', textTransform: 'uppercase',
+                            letterSpacing: '0.1em', marginBottom: 5 }}>{kpi.label}</div>
+              <div style={{ fontSize: 20, fontWeight: 600, color: kpi.color,
+                            lineHeight: 1, fontVariantNumeric: 'tabular-nums',
+                            letterSpacing: '-0.02em' }}>{kpi.val}</div>
+              <div style={{ fontSize: 8, color: 'var(--muted)', marginTop: 3 }}>{kpi.sub}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* ── MARKET GRID ── */}
+        <Card>
+          <div style={{ display: 'flex', alignItems: 'center',
+                        justifyContent: 'space-between', marginBottom: 12 }}>
+            <SectionLabel>Mercados Activos · {markets.length} pares · actualización cada 5s</SectionLabel>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, fontSize: 8, color: 'var(--muted)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <div style={{ width: 3, height: 3, background: 'var(--win)', imageRendering: 'pixelated' }} />
+                <span>precio real</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <div style={{ width: 4, height: 4, background: 'var(--accent)' }} />
+                <span>apuesta activa</span>
+              </div>
+              <span><span style={{ color: 'var(--win)' }}>■</span> YES% &nbsp;
+                    <span style={{ color: 'var(--loss)' }}>■</span> NO%</span>
+            </div>
+          </div>
+
+          {/* grid: 50px coin label + 3 TF columns */}
+          <div style={{ display: 'grid', gridTemplateColumns: '50px repeat(3, 1fr)', gap: 5 }}>
+            {/* header row */}
+            <div />
+            {TFS.map(tf => (
+              <div key={tf} style={{
+                fontSize: 8, color: 'var(--accent)', textTransform: 'uppercase',
+                letterSpacing: '0.14em', textAlign: 'center',
+                paddingBottom: 7, borderBottom: '1px solid var(--dim)',
+              }}>{tf}</div>
+            ))}
+
+            {/* coin rows */}
+            {ASSETS.map(coin => (
+              <React.Fragment key={coin}>
+                <div style={{ display: 'flex', flexDirection: 'column',
+                              alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                  <CoinIcon asset={coin} size={11} />
+                  <span style={{ fontSize: 8, fontWeight: 600, color: 'var(--text)',
+                                 letterSpacing: '0.02em' }}>{coin}</span>
+                </div>
+                {TFS.map(tf => {
+                  const m = marketMap[coin] && marketMap[coin][tf];
+                  return m
+                    ? <MarketCell key={tf} m={m} />
+                    : (
+                      <div key={tf} style={{
+                        background: 'var(--dim)', padding: '8px',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 8, color: 'var(--muted)',
+                      }}>N/A</div>
+                    );
+                })}
+              </React.Fragment>
+            ))}
+          </div>
+        </Card>
+
+        {/* ── MAIN GRID ── */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 14 }}>
+
+          {/* LEFT */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+            {/* PnL Acumulado */}
+            <Card>
+              <div style={{ display: 'flex', alignItems: 'flex-start',
+                            justifyContent: 'space-between', marginBottom: 14 }}>
+                <SectionLabel>PnL Acumulado · demo</SectionLabel>
+                <span style={{ fontSize: 12, fontWeight: 600,
+                               color: totalPnl >= 0 ? 'var(--win)' : 'var(--loss)' }}>
+                  {totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)}
+                </span>
+              </div>
+              <StepChart data={pnlCurve} />
+            </Card>
+
+            {/* Posiciones Activas */}
+            <Card>
+              <SectionLabel>Posiciones Activas</SectionLabel>
+              {live.length === 0 ? (
+                <div style={{ color: 'var(--muted)', fontSize: 11, padding: '12px 0' }}>
+                  Sin posiciones abiertas — el bot evalúa cada 5s
+                </div>
+              ) : (
+                <>
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '52px 36px 30px 1fr 56px 62px 54px 52px',
+                    gap: 6, paddingBottom: 8,
+                    borderBottom: '1px solid var(--dim)', marginBottom: 4,
+                  }}>
+                    {['activo','tf','dir','progreso','stake','odds','p/l','cierre'].map(h => (
+                      <div key={h} style={{ fontSize: 8, color: 'var(--muted)',
+                                            textTransform: 'uppercase', letterSpacing: '0.08em' }}>{h}</div>
+                    ))}
+                  </div>
+                  {live.map((pos, i) => {
+                    const edge     = pos.curOdds - pos.entOdds;
+                    const progress = Math.min(1, 1 - pos.secsLeft / 300);
+                    const isUrgent = pos.secsLeft < 60;
+                    return (
+                      <div key={pos.id} style={{
+                        display: 'grid',
+                        gridTemplateColumns: '52px 36px 30px 1fr 56px 62px 54px 52px',
+                        gap: 6, padding: '8px 0',
+                        borderBottom: i < live.length - 1 ? '1px solid rgba(44,35,24,0.8)' : 'none',
+                        alignItems: 'center',
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <CoinIcon asset={pos.asset} size={8} />
+                          <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text)' }}>
+                            {pos.asset}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--accent)' }}>{pos.tf}</div>
+                        <div style={{ fontSize: 11, fontWeight: 700,
+                                      color: pos.dir === 'UP' ? 'var(--win)' : 'var(--loss)' }}>
+                          {pos.dir === 'UP' ? '▲' : '▼'}
+                        </div>
+                        <SegBar ratio={progress} variant={isUrgent ? 'acc' : 'win'} total={10} />
+                        <div style={{ fontSize: 11, color: 'var(--text)' }}>${pos.stake.toFixed(0)}</div>
+                        <div style={{ fontSize: 11 }}>
+                          <span style={{ color: edge >= 0 ? 'var(--win)' : 'var(--loss)' }}>
+                            {pos.curOdds.toFixed(3)}
+                          </span>
+                          <span style={{ fontSize: 9, color: 'var(--muted)', marginLeft: 3 }}>
+                            {edge >= 0 ? '+' : ''}{(edge * 100).toFixed(1)}%
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 11, fontWeight: 500,
+                                      color: pos.unrealizedPnl >= 0 ? 'var(--win)' : 'var(--loss)' }}>
+                          {pos.unrealizedPnl >= 0 ? '+' : ''}${pos.unrealizedPnl.toFixed(1)}
+                        </div>
+                        <LiveTimer init={pos.secsLeft} />
+                      </div>
+                    );
+                  })}
+                </>
+              )}
+            </Card>
+
+          </div>
+
+          {/* RIGHT */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+            {/* Win Rate por Activo */}
+            <Card>
+              <SectionLabel>Win Rate por Activo</SectionLabel>
+              {assetStats.length === 0 ? (
+                <div style={{ color: 'var(--muted)', fontSize: 11, padding: '8px 0' }}>
+                  Sin trades cerrados aún
+                </div>
+              ) : assetStats.map((a, i) => {
+                const wr      = a.total > 0 ? a.wins / a.total : 0;
+                const variant = wr >= 0.55 ? 'win' : wr >= 0.5 ? 'acc' : 'loss';
+                return (
+                  <div key={a.asset} style={{
+                    padding: '6px 0',
+                    borderBottom: i < assetStats.length - 1 ? '1px solid var(--dim)' : 'none',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center',
+                                  justifyContent: 'space-between', marginBottom: 5 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                        <CoinIcon asset={a.asset} size={9} />
+                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+                          {a.asset}
+                        </span>
+                        <span style={{ fontSize: 9, color: 'var(--muted)' }}>
+                          {a.wins}/{a.total}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                        <span style={{ fontSize: 11, fontWeight: 500,
+                                       color: wr >= 0.55 ? 'var(--win)' : wr >= 0.5 ? 'var(--text)' : 'var(--loss)' }}>
+                          {(wr * 100).toFixed(0)}%
+                        </span>
+                        <span style={{ fontSize: 10, width: 48, textAlign: 'right',
+                                       color: a.pnl >= 0 ? 'var(--win)' : 'var(--loss)' }}>
+                          {a.pnl >= 0 ? '+' : ''}${a.pnl.toFixed(0)}
+                        </span>
+                      </div>
+                    </div>
+                    <SegBar ratio={wr} variant={variant} total={16} />
+                  </div>
+                );
+              })}
+            </Card>
+
+            {/* Por Timeframe */}
+            <Card>
+              <SectionLabel>Por Timeframe</SectionLabel>
+              {tfStats.length === 0 ? (
+                <div style={{ color: 'var(--muted)', fontSize: 11, padding: '8px 0' }}>
+                  Sin trades cerrados aún
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {tfStats.map(tf => {
+                    const wr = tf.total > 0 ? tf.wins / tf.total : 0;
+                    return (
+                      <div key={tf.tf} style={{
+                        background: 'var(--s2)', padding: '12px 14px', position: 'relative',
+                      }}>
+                        <div style={{ position: 'absolute', top: -1, left: -1,
+                                      width: 3, height: 3, background: 'var(--accent)', opacity: 0.4 }} />
+                        <div style={{ display: 'flex', alignItems: 'center',
+                                      justifyContent: 'space-between', marginBottom: 8 }}>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent)',
+                                         letterSpacing: '0.04em' }}>{tf.tf}</span>
+                          <span style={{ fontSize: 10, fontWeight: 600,
+                                         color: tf.pnl >= 0 ? 'var(--win)' : 'var(--loss)' }}>
+                            {tf.pnl >= 0 ? '+' : ''}${tf.pnl.toFixed(0)}
+                          </span>
+                        </div>
+                        <SegBar ratio={wr} variant={wr >= 0.55 ? 'win' : wr >= 0.5 ? 'acc' : 'loss'} total={12} />
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr',
+                                      gap: 4, marginTop: 8 }}>
+                          {[
+                            { l: 'win rate',  v: `${(wr * 100).toFixed(1)}%` },
+                            { l: 'trades',    v: tf.total },
+                            { l: 'avg entry', v: `${tf.avgSbc.toFixed(0)}s` },
+                          ].map(m2 => (
+                            <div key={m2.l}>
+                              <div style={{ fontSize: 8, color: 'var(--muted)',
+                                            textTransform: 'uppercase', letterSpacing: '0.06em' }}>{m2.l}</div>
+                              <div style={{ fontSize: 12, color: 'var(--text)',
+                                            fontWeight: 500, marginTop: 1 }}>{m2.v}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </Card>
+
+            {/* Últimos Trades */}
+            <Card>
+              <SectionLabel>Últimos Trades</SectionLabel>
+              {trades.length === 0 ? (
+                <div style={{ color: 'var(--muted)', fontSize: 11, padding: '8px 0' }}>
+                  Sin trades cerrados aún
+                </div>
+              ) : trades.slice(-12).reverse().map((t, i) => (
+                <div key={t.id} style={{
+                  display: 'grid',
+                  gridTemplateColumns: '48px 30px 28px 1fr 44px',
+                  gap: 6, padding: '5px 0',
+                  borderBottom: i < Math.min(trades.length, 12) - 1 ? '1px solid var(--dim)' : 'none',
+                  alignItems: 'center',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <CoinIcon asset={t.asset} size={7} />
+                    <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)' }}>
+                      {t.asset}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: 9, color: 'var(--accent)' }}>{t.tf}</span>
+                  <span style={{ fontSize: 10, color: t.dir === 'UP' ? 'var(--win)' : 'var(--loss)' }}>
+                    {t.dir === 'UP' ? '▲' : '▼'}
+                  </span>
+                  <div style={{ height: 2, background: t.won ? 'var(--win)' : 'var(--loss)',
+                                opacity: 0.6, imageRendering: 'pixelated' }} />
+                  <span style={{ fontSize: 11, textAlign: 'right', fontWeight: 500,
+                                 color: t.payout >= 0 ? 'var(--win)' : 'var(--loss)' }}>
+                    {t.payout >= 0 ? '+' : ''}${t.payout.toFixed(1)}
+                  </span>
+                </div>
+              ))}
+            </Card>
+
+          </div>
+        </div>
+
+        {/* ── HEATMAP ── */}
+        {trades.length > 0 && (
+          <Card>
+            <div style={{ display: 'flex', alignItems: 'center',
+                          justifyContent: 'space-between', marginBottom: 14 }}>
+              <SectionLabel>Heatmap · PnL por Día y Hora</SectionLabel>
+              <div style={{ display: 'flex', gap: 16, fontSize: 9, color: 'var(--muted)' }}>
+                <span style={{ color: 'var(--loss)' }}>■ pérdida</span>
+                <span style={{ color: 'var(--win)'  }}>■ ganancia</span>
+              </div>
+            </div>
+            <Heatmap data={heatmap} />
+          </Card>
+        )}
+
+        {/* ── TRADE LOG ── */}
+        <Card>
+          <div style={{ display: 'flex', alignItems: 'center',
+                        justifyContent: 'space-between', marginBottom: 14 }}>
+            <SectionLabel>Trade Log · Registro Completo</SectionLabel>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <span style={{ fontSize: 8, color: 'var(--muted)', letterSpacing: '0.06em' }}>
+                ESTRATEGIA: {KPI.entry_window_secs}s | {KPI.bet_range_lo}–{KPI.bet_range_hi} | {KPI.bet_shares} shares
+              </span>
+              <span style={{ fontSize: 9, color: 'var(--muted)', letterSpacing: '0.06em' }}>
+                {trades.length} operaciones
+              </span>
+            </div>
+          </div>
+
+          {trades.length === 0 ? (
+            <div style={{ color: 'var(--muted)', fontSize: 11, padding: '8px 0' }}>
+              Sin trades registrados aún — el bot opera en los últimos {KPI.entry_window_secs}s cuando el precio está en [{KPI.bet_range_lo}–{KPI.bet_range_hi}]
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              {/* column headers */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '58px 44px 30px 30px 76px 76px 52px 52px 36px 60px 52px',
+                gap: 5, paddingBottom: 8,
+                borderBottom: '1px solid var(--dim)', marginBottom: 2,
+                minWidth: 580,
+              }}>
+                {['market id','activo','tf','dir','hora entrada','hora salida','ent_p','sal_p','×','pnl','estado'].map(h => (
+                  <div key={h} style={{ fontSize: 7, color: 'var(--muted)',
+                                        textTransform: 'uppercase', letterSpacing: '0.08em' }}>{h}</div>
+                ))}
+              </div>
+
+              {/* scrollable rows — most recent first */}
+              <div style={{ maxHeight: 340, overflowY: 'auto' }}>
+                {[...trades].reverse().map((t, i) => (
+                  <div key={t.id} style={{
+                    display: 'grid',
+                    gridTemplateColumns: '58px 44px 30px 30px 76px 76px 52px 52px 36px 60px 52px',
+                    gap: 5, padding: '5px 0',
+                    borderBottom: i < trades.length - 1 ? '1px solid rgba(44,35,24,0.5)' : 'none',
+                    alignItems: 'center', minWidth: 580,
+                  }}>
+                    <span style={{ fontSize: 8, color: 'var(--muted)', overflow: 'hidden',
+                                   textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {t.id}
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <CoinIcon asset={t.asset} size={7} />
+                      <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text)' }}>{t.asset}</span>
+                    </div>
+                    <span style={{ fontSize: 9, color: 'var(--accent)' }}>{t.tf}</span>
+                    <span style={{ fontSize: 10, fontWeight: 700,
+                                   color: t.dir === 'UP' ? 'var(--win)' : 'var(--loss)' }}>
+                      {t.dir === 'UP' ? '▲' : '▼'}
+                    </span>
+                    <span style={{ fontSize: 9, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
+                      {fmtTime(t.entry_ts || t.ts)}
+                    </span>
+                    <span style={{ fontSize: 9, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
+                      {fmtTime(t.ts)}
+                    </span>
+                    <span style={{ fontSize: 9, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
+                      {t.entry_p != null ? t.entry_p.toFixed(3) : '—'}
+                    </span>
+                    <span style={{ fontSize: 9, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
+                      {t.exit_p != null && t.exit_p > 0 ? t.exit_p.toFixed(3) : '—'}
+                    </span>
+                    <span style={{ fontSize: 9, color: 'var(--muted)' }}>×{t.shares || '—'}</span>
+                    <span style={{ fontSize: 11, fontWeight: 600, textAlign: 'right',
+                                   fontVariantNumeric: 'tabular-nums',
+                                   color: t.payout >= 0 ? 'var(--win)' : 'var(--loss)' }}>
+                      {t.payout >= 0 ? '+' : ''}${t.payout.toFixed(2)}
+                    </span>
+                    <span style={{ fontSize: 8, letterSpacing: '0.04em',
+                                   color: t.won ? 'var(--win)' : 'var(--loss)' }}>
+                      {t.status || (t.won ? 'won' : 'lost')}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </Card>
+
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
