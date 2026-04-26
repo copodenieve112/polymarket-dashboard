@@ -528,16 +528,24 @@ function App() {
             </svg>
             <span style={{ fontSize: 10, color: 'var(--win)', letterSpacing: '0.08em' }}>LIVE</span>
           </div>
-          {/* api status */}
+          {/* connection status */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <div style={{
               width: 4, height: 4, imageRendering: 'pixelated',
-              background: allFresh ? 'var(--win)' : 'var(--loss)',
+              background: KPI.connected ? 'var(--win)' : 'var(--loss)',
             }} />
             <span style={{ fontSize: 9, letterSpacing: '0.06em',
-                           color: allFresh ? 'var(--win)' : 'var(--loss)' }}>
-              API {KPI.n_fresh}/{KPI.n_markets}
+                           color: KPI.connected ? 'var(--win)' : 'var(--loss)' }}>
+              {KPI.connected ? 'CONNECTED' : 'DISCONNECTED'}
             </span>
+          </div>
+          {/* latency */}
+          <div style={{ fontSize: 9, color: 'var(--muted)', letterSpacing: '0.04em' }}>
+            <span style={{ color: KPI.api_latency_ms < 300 ? 'var(--win)' : KPI.api_latency_ms < 800 ? 'var(--accent)' : 'var(--loss)' }}>
+              {KPI.api_latency_ms}ms
+            </span>
+            {' '}· {KPI.n_fresh}/{KPI.n_markets} feeds
+            {KPI.api_errors > 0 && <span style={{ color: 'var(--loss)', marginLeft: 5 }}>⚠ {KPI.api_errors} err</span>}
           </div>
           {/* demo badge */}
           <span style={{ fontSize: 8, color: 'var(--muted)', letterSpacing: '0.1em',

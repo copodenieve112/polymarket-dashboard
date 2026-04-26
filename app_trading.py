@@ -11,6 +11,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from clock import now_utc
+import data_feed as _df
 from data_feed import fetch_markets
 from engine import DemoEngine, INITIAL_CAP
 from models import Market
@@ -134,22 +135,23 @@ def build_js_data(engine: DemoEngine, markets: List[Market]) -> tuple:
         st.session_state.prev_updated_at[key] = m.updated_at_ms
 
         markets_data.append({
-            "coin":            m.coin,
-            "tf":              m.window_label,
-            "price_yes":       round(m.price_yes, 4),
-            "price_no":        round(m.price_no, 4),
-            "bid":             round(m.bid, 4) if m.bid > 0 else None,
-            "ask":             round(m.ask, 4) if m.ask > 0 else None,
-            "spread":          round(m.spread, 4) if m.has_real_price else None,
-            "time_left_secs":  int(max(0, m.time_left_seconds)),
-            "time_left_str":   m.time_left,
-            "has_real_price":  m.has_real_price,
-            "last_fetched_ms": m.last_fetched_ms,
-            "updated_at_ms":   m.updated_at_ms,
-            "sparkline":       sparkline,
-            "active_bet":      m.question in open_questions,
-            "volume":          round(m.volume, 0),
-            "in_entry_window": m.time_left_seconds <= ENTRY_WINDOW.get(m.window_label, (20, 90))[1],
+            "coin":             m.coin,
+            "tf":               m.window_label,
+            "price_yes":        round(m.price_yes, 4),
+            "price_no":         round(m.price_no, 4),
+            "bid":              round(m.bid, 4) if m.bid > 0 else None,
+            "ask":              round(m.ask, 4) if m.ask > 0 else None,
+            "spread":           round(m.spread, 4) if m.has_real_price else None,
+            "last_trade_price": round(m.last_trade_price, 4) if m.last_trade_price > 0 else None,
+            "time_left_secs":   int(max(0, m.time_left_seconds)),
+            "time_left_str":    m.time_left,
+            "has_real_price":   m.has_real_price,
+            "last_fetched_ms":  m.last_fetched_ms,
+            "updated_at_ms":    m.updated_at_ms,
+            "sparkline":        sparkline,
+            "active_bet":       m.question in open_questions,
+            "volume":           round(m.volume, 0),
+            "in_entry_window":  m.time_left_seconds <= ENTRY_WINDOW.get(m.window_label, (20, 90))[1],
         })
 
     # KPI
@@ -183,6 +185,9 @@ def build_js_data(engine: DemoEngine, markets: List[Market]) -> tuple:
         "signal_threshold":  SIGNAL_THRESHOLD,
         "kelly_fraction":    KELLY_FRACTION,
         "max_risk_pct":      MAX_RISK_PCT,
+        "api_latency_ms":    round(_df.last_fetch_latency_ms, 0),
+        "api_errors":        _df.last_fetch_errors,
+        "connected":         _df.last_fetch_errors < len(list(__import__('config').SERIES)),
     }
 
     return trades_data, live_data, kpi, markets_data
