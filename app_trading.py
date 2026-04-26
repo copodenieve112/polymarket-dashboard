@@ -14,7 +14,7 @@ from clock import now_utc
 from data_feed import fetch_markets
 from engine import DemoEngine, INITIAL_CAP
 from models import Market
-from strategy import ENTRY_WINDOW_SECS, BET_RANGE_LO, BET_RANGE_HI, BET_SHARES
+from strategy import ENTRY_WINDOW, SIGNAL_THRESHOLD, KELLY_FRACTION, MAX_RISK_PCT
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -144,7 +144,7 @@ def build_js_data(engine: DemoEngine, markets: List[Market]) -> tuple:
             "sparkline":       sparkline,
             "active_bet":      m.question in open_questions,
             "volume":          round(m.volume, 0),
-            "in_entry_window": m.time_left_seconds <= ENTRY_WINDOW_SECS,
+            "in_entry_window": m.time_left_seconds <= ENTRY_WINDOW.get(m.window_label, (20, 90))[1],
         })
 
     # KPI
@@ -165,17 +165,19 @@ def build_js_data(engine: DemoEngine, markets: List[Market]) -> tuple:
         "today_pnl":        round(today_pnl, 2),
         "win_rate":         round(win_rate, 1),
         "roi":              round(roi, 1),
-        "avg_sbc":          float(ENTRY_WINDOW_SECS),
-        "wins":             wins,
-        "capital_initial":  INITIAL_CAP,
-        "capital_current":  round(portfolio.current_capital, 2),
-        "n_markets":        len(markets),
-        "n_fresh":          n_fresh,
-        "fetch_ts":         int(now_utc_dt.timestamp() * 1000),
-        "entry_window_secs": ENTRY_WINDOW_SECS,
-        "bet_range_lo":     BET_RANGE_LO,
-        "bet_range_hi":     BET_RANGE_HI,
-        "bet_shares":       BET_SHARES,
+        "avg_sbc":           ENTRY_WINDOW["5m"][1],
+        "wins":              wins,
+        "capital_initial":   INITIAL_CAP,
+        "capital_current":   round(portfolio.current_capital, 2),
+        "n_markets":         len(markets),
+        "n_fresh":           n_fresh,
+        "fetch_ts":          int(now_utc_dt.timestamp() * 1000),
+        "entry_window_5m":   ENTRY_WINDOW["5m"],
+        "entry_window_15m":  ENTRY_WINDOW["15m"],
+        "entry_window_1h":   ENTRY_WINDOW["1h"],
+        "signal_threshold":  SIGNAL_THRESHOLD,
+        "kelly_fraction":    KELLY_FRACTION,
+        "max_risk_pct":      MAX_RISK_PCT,
     }
 
     return trades_data, live_data, kpi, markets_data
@@ -210,7 +212,7 @@ with st.sidebar:
     st.caption(f"Trades: {len(p.trades)} / 50")
     st.caption(f"Runtime: {p.runtime_hours:.1f}h / 24h")
     st.caption(f"Capital: ${p.current_capital:.2f}")
-    st.caption(f"Estrategia: {ENTRY_WINDOW_SECS}s | {BET_RANGE_LO}–{BET_RANGE_HI} | {BET_SHARES} shares")
+    st.caption(f"Señal: |score|≥{SIGNAL_THRESHOLD} | Kelly {KELLY_FRACTION}× | cap {MAX_RISK_PCT*100:.0f}%")
 
     if p.is_demo_finished:
         reason = "50 trades" if len(p.trades) >= 50 else "24h"
