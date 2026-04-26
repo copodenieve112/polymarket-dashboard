@@ -104,13 +104,10 @@ const marketMap = (() => {
 
 /* ── COIN PIXEL ART ──────────────────────────────────────── */
 const COIN_PIXELS = {
-  BTC:  [[0,1,1,1,0],[1,0,1,0,1],[0,1,1,1,0],[1,0,1,0,1],[0,1,1,1,0]],
-  ETH:  [[0,0,1,0,0],[0,1,1,1,0],[1,1,1,1,1],[0,1,1,1,0],[0,0,1,0,0]],
-  SOL:  [[1,1,1,1,1],[0,0,0,1,0],[0,0,1,0,0],[0,1,0,0,0],[1,1,1,1,1]],
-  BNB:  [[0,1,0,1,0],[1,1,1,1,1],[0,1,1,1,0],[1,1,1,1,1],[0,1,0,1,0]],
-  XRP:  [[1,0,0,0,1],[0,1,0,1,0],[0,0,1,0,0],[0,1,0,1,0],[1,0,0,0,1]],
-  DOGE: [[0,1,1,0,0],[1,0,0,1,0],[1,1,1,0,1],[1,0,0,1,0],[0,1,1,0,0]],
-  HYPE: [[1,0,0,0,1],[1,0,0,0,1],[1,1,1,1,1],[1,0,0,0,1],[1,0,0,0,1]],
+  BTC: [[0,1,1,1,0],[1,0,1,0,1],[0,1,1,1,0],[1,0,1,0,1],[0,1,1,1,0]],
+  ETH: [[0,0,1,0,0],[0,1,1,1,0],[1,1,1,1,1],[0,1,1,1,0],[0,0,1,0,0]],
+  SOL: [[1,1,1,1,1],[0,0,0,1,0],[0,0,1,0,0],[0,1,0,0,0],[1,1,1,1,1]],
+  XRP: [[1,0,0,0,1],[0,1,0,1,0],[0,0,1,0,0],[0,1,0,1,0],[1,0,0,0,1]],
 };
 
 function CoinIcon({ asset, size = 10, color }) {
@@ -322,98 +319,148 @@ function MarketCell({ m }) {
     return () => clearInterval(iv);
   }, []);
 
-  const inEntry = secs > 0 && secs <= 60;
+  const inEntry = secs > 0 && secs <= 90;
+  const urgent  = secs > 0 && secs <= 30;
   const closed  = secs === 0;
 
   const timeStr = closed       ? 'CLOSED'
     : secs < 60   ? `${secs}s`
-    : secs < 3600 ? `${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2,'0')}s`
-    : `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`;
+    : secs < 3600 ? `${Math.floor(secs/60)}m ${String(secs%60).padStart(2,'0')}s`
+    : `${Math.floor(secs/3600)}h ${Math.floor((secs%3600)/60)}m`;
 
   const spark  = m.sparkline || [m.price_yes];
   const sMin   = Math.min(...spark) - 0.005;
   const sMax   = Math.max(...spark) + 0.005;
   const sRange = sMax - sMin || 0.01;
-  const SW = 100, SH = 10;
+  const SW = 120, SH = 14;
   const sy = v => SH - 1 - Math.round((v - sMin) / sRange * (SH - 2));
+
+  const pYes    = m.price_yes;
+  const pNo     = m.price_no;
+  const bid     = m.bid;
+  const ask     = m.ask;
+  const spread  = m.spread;
+  const upWins  = pYes > 0.5;
 
   return (
     <div style={{
-      background:    m.active_bet ? 'var(--s2)' : 'var(--s1)',
-      border:        `1px solid ${m.active_bet ? 'var(--border-hi)' : inEntry ? 'rgba(196,164,107,0.2)' : 'var(--border)'}`,
-      padding:       '8px 9px',
-      position:      'relative',
-      animation:     inEntry ? 'glow 1.5s ease-in-out infinite' : 'none',
+      background:  m.active_bet ? 'rgba(196,164,107,0.05)' : 'var(--s1)',
+      border:      `1px solid ${urgent ? 'rgba(196,164,107,0.55)' : inEntry ? 'rgba(196,164,107,0.22)' : 'var(--border)'}`,
+      padding:     '11px 12px',
+      position:    'relative',
+      animation:   urgent ? 'glow 0.9s ease-in-out infinite' : inEntry ? 'glow 2s ease-in-out infinite' : 'none',
     }}>
-      {/* freshness dot: green=<30s, amber=30-120s, red=>120s, gray=no real price */}
-      <div style={{
-        position: 'absolute', top: 5, right: 5,
-        width: 3, height: 3, imageRendering: 'pixelated',
-        background: freshnessColor(m.updated_at_ms, m.has_real_price),
-      }} title={m.updated_at_ms ? `API upd: ${new Date(m.updated_at_ms).toISOString().slice(11,19)} UTC` : 'sin precio real'} />
 
-      {/* active bet corner */}
+      {/* freshness dot */}
+      <div style={{
+        position: 'absolute', top: 6, right: 6,
+        width: 4, height: 4, imageRendering: 'pixelated',
+        background: freshnessColor(m.updated_at_ms, m.has_real_price),
+      }} title={m.updated_at_ms ? `upd ${new Date(m.updated_at_ms).toISOString().slice(11,19)} UTC` : '—'} />
+
+      {/* active bet mark */}
       {m.active_bet && (
-        <div style={{
-          position: 'absolute', top: -1, left: -1,
-          width: 4, height: 4, background: 'var(--accent)', opacity: 0.9,
-        }} />
+        <div style={{ position:'absolute', top:-1, left:-1,
+                      width:5, height:5, background:'var(--accent)', opacity:0.9 }} />
       )}
 
-      {/* YES / bar / NO */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3 }}>
-        <span style={{ fontSize: 8, color: 'var(--win)', fontWeight: 700,
-                       minWidth: 28, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-          {(m.price_yes * 100).toFixed(1)}
-        </span>
-        <div style={{ flex: 1, height: 5, background: 'var(--dim)', overflow: 'hidden', position: 'relative' }}>
-          <div style={{
-            position: 'absolute', left: 0, top: 0, height: '100%',
-            width: `${m.price_yes * 100}%`,
-            background: 'var(--win)', imageRendering: 'pixelated',
-          }} />
+      {/* ── UP% / DOWN% big numbers ── */}
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-end', marginBottom:6 }}>
+        <div style={{ textAlign:'left' }}>
+          <div style={{ fontSize:7, color:'var(--win)', letterSpacing:'0.1em',
+                        textTransform:'uppercase', marginBottom:1 }}>UP</div>
+          <div style={{ fontSize:20, fontWeight:700, lineHeight:1,
+                        color: upWins ? 'var(--win)' : 'var(--muted)',
+                        fontVariantNumeric:'tabular-nums', letterSpacing:'-0.02em' }}>
+            {(pYes*100).toFixed(1)}<span style={{fontSize:11,fontWeight:400}}>%</span>
+          </div>
         </div>
-        <span style={{ fontSize: 8, color: 'var(--loss)', fontWeight: 700,
-                       minWidth: 28, fontVariantNumeric: 'tabular-nums' }}>
-          {(m.price_no * 100).toFixed(1)}
-        </span>
-      </div>
 
-      {/* sparkline */}
-      {spark.length > 1 && (
-        <svg width="100%" height={SH} viewBox={`0 0 ${SW} ${SH}`}
+        {/* center: sparkline */}
+        <svg width={SW} height={SH} viewBox={`0 0 ${SW} ${SH}`}
              preserveAspectRatio="none" shapeRendering="crispEdges"
-             style={{ display: 'block', marginBottom: 3 }}>
-          {spark.map((v, i) => {
-            if (i === 0) return null;
-            const x1 = Math.round((i - 1) / (spark.length - 1) * SW);
-            const x2 = Math.round(i       / (spark.length - 1) * SW);
-            return (
-              <line key={i} x1={x1} y1={sy(spark[i-1])} x2={x2} y2={sy(v)}
-                    stroke="var(--accent)" strokeWidth="1" opacity="0.4" />
-            );
+             style={{ display:'block', flex:1, margin:'0 8px', alignSelf:'center' }}>
+          {spark.map((v,i) => {
+            if (i===0) return null;
+            const x1 = Math.round((i-1)/(spark.length-1)*SW);
+            const x2 = Math.round(i/(spark.length-1)*SW);
+            return <line key={i} x1={x1} y1={sy(spark[i-1])} x2={x2} y2={sy(v)}
+                         stroke="var(--accent)" strokeWidth="1.5" opacity="0.5" />;
           })}
         </svg>
-      )}
 
-      {/* time to expiry */}
-      <div style={{
-        fontSize: 8, textAlign: 'center', fontVariantNumeric: 'tabular-nums',
-        fontWeight: inEntry ? 700 : 500,
-        color:  closed ? 'var(--muted)' : inEntry ? 'var(--accent)' : 'var(--text)',
-        animation: inEntry ? 'blink 1s steps(1) infinite' : 'none',
-        letterSpacing: '0.02em',
-      }}>
-        {timeStr}
+        <div style={{ textAlign:'right' }}>
+          <div style={{ fontSize:7, color:'var(--loss)', letterSpacing:'0.1em',
+                        textTransform:'uppercase', marginBottom:1 }}>DOWN</div>
+          <div style={{ fontSize:20, fontWeight:700, lineHeight:1,
+                        color: !upWins ? 'var(--loss)' : 'var(--muted)',
+                        fontVariantNumeric:'tabular-nums', letterSpacing:'-0.02em' }}>
+            {(pNo*100).toFixed(1)}<span style={{fontSize:11,fontWeight:400}}>%</span>
+          </div>
+        </div>
       </div>
 
-      {/* active bet tag */}
-      {m.active_bet && (
-        <div style={{ fontSize: 7, textAlign: 'center', color: 'var(--accent)',
-                      marginTop: 2, letterSpacing: '0.06em', fontWeight: 600 }}>
-          ● BET
+      {/* ── probability bar ── */}
+      <div style={{ height:4, background:'var(--dim)', position:'relative', marginBottom:8, overflow:'hidden' }}>
+        <div style={{
+          position:'absolute', left:0, top:0, height:'100%',
+          width:`${pYes*100}%`, background:'var(--win)', imageRendering:'pixelated',
+        }} />
+        <div style={{
+          position:'absolute', right:0, top:0, height:'100%',
+          width:`${pNo*100}%`, background:'var(--loss)', imageRendering:'pixelated',
+          opacity:0.6,
+        }} />
+      </div>
+
+      {/* ── BID / ASK row ── */}
+      {m.has_real_price && bid != null && ask != null ? (
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:7 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+            <span style={{ fontSize:7, color:'var(--muted)', letterSpacing:'0.08em' }}>BID</span>
+            <span style={{ fontSize:13, fontWeight:600, color:'var(--win)',
+                           fontVariantNumeric:'tabular-nums' }}>
+              {(bid*100).toFixed(1)}<span style={{fontSize:9,fontWeight:400,color:'var(--muted)'}}>¢</span>
+            </span>
+          </div>
+          <div style={{ fontSize:8, color:'var(--muted)', letterSpacing:'0.04em' }}>
+            spread {spread != null ? (spread*100).toFixed(1) : '—'}<span style={{fontSize:7}}>¢</span>
+          </div>
+          <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+            <span style={{ fontSize:13, fontWeight:600, color:'var(--accent)',
+                           fontVariantNumeric:'tabular-nums' }}>
+              {(ask*100).toFixed(1)}<span style={{fontSize:9,fontWeight:400,color:'var(--muted)'}}>¢</span>
+            </span>
+            <span style={{ fontSize:7, color:'var(--muted)', letterSpacing:'0.08em' }}>ASK</span>
+          </div>
         </div>
+      ) : (
+        <div style={{ height:26, display:'flex', alignItems:'center', justifyContent:'center',
+                      fontSize:8, color:'var(--muted)', marginBottom:7 }}>sin order book</div>
       )}
+
+      {/* ── countdown ── */}
+      <div style={{
+        display:'flex', alignItems:'center', justifyContent:'space-between',
+      }}>
+        <div style={{ fontSize:7, color:'var(--muted)' }}>
+          vol ${m.volume > 999 ? `${(m.volume/1000).toFixed(0)}k` : m.volume}
+        </div>
+        <div style={{
+          fontSize: urgent ? 14 : 11,
+          fontWeight: urgent ? 700 : 500,
+          fontVariantNumeric:'tabular-nums',
+          letterSpacing:'0.02em',
+          color:  closed ? 'var(--muted)' : urgent ? 'var(--accent)' : inEntry ? 'var(--text)' : 'var(--muted)',
+          animation: urgent ? 'blink 0.7s steps(1) infinite' : 'none',
+        }}>
+          {timeStr}
+        </div>
+        <div style={{ fontSize:7, color: m.active_bet ? 'var(--accent)' : 'transparent',
+                      fontWeight:600, letterSpacing:'0.06em' }}>
+          {m.active_bet ? '● BET' : '·'}
+        </div>
+      </div>
     </div>
   );
 }
@@ -587,8 +634,8 @@ function App() {
             </div>
           </div>
 
-          {/* grid: 50px coin label + 3 TF columns */}
-          <div style={{ display: 'grid', gridTemplateColumns: '50px repeat(3, 1fr)', gap: 5 }}>
+          {/* grid: 64px coin label + 3 TF columns */}
+          <div style={{ display: 'grid', gridTemplateColumns: '64px repeat(3, 1fr)', gap: 8 }}>
             {/* header row */}
             <div />
             {TFS.map(tf => (
@@ -603,10 +650,10 @@ function App() {
             {ASSETS.map(coin => (
               <React.Fragment key={coin}>
                 <div style={{ display: 'flex', flexDirection: 'column',
-                              alignItems: 'center', justifyContent: 'center', gap: 5 }}>
-                  <CoinIcon asset={coin} size={11} />
-                  <span style={{ fontSize: 8, fontWeight: 600, color: 'var(--text)',
-                                 letterSpacing: '0.02em' }}>{coin}</span>
+                              alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                  <CoinIcon asset={coin} size={14} />
+                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text)',
+                                 letterSpacing: '0.04em' }}>{coin}</span>
                 </div>
                 {TFS.map(tf => {
                   const m = marketMap[coin] && marketMap[coin][tf];

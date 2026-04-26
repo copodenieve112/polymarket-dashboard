@@ -35,9 +35,11 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ── Session state ─────────────────────────────────────────────────────────────
+# ── Session state — siempre arranca en 0 al abrir el dashboard ────────────────
 if "engine" not in st.session_state:
-    st.session_state.engine = DemoEngine()
+    engine = DemoEngine()
+    engine.reset()                        # contador siempre a 0 al abrir
+    st.session_state.engine = engine
 if "price_history" not in st.session_state:
     st.session_state.price_history = {}
 if "prev_updated_at" not in st.session_state:
@@ -136,6 +138,9 @@ def build_js_data(engine: DemoEngine, markets: List[Market]) -> tuple:
             "tf":              m.window_label,
             "price_yes":       round(m.price_yes, 4),
             "price_no":        round(m.price_no, 4),
+            "bid":             round(m.bid, 4) if m.bid > 0 else None,
+            "ask":             round(m.ask, 4) if m.ask > 0 else None,
+            "spread":          round(m.spread, 4) if m.has_real_price else None,
             "time_left_secs":  int(max(0, m.time_left_seconds)),
             "time_left_str":   m.time_left,
             "has_real_price":  m.has_real_price,
@@ -187,7 +192,7 @@ def render_dashboard(engine: DemoEngine, markets: List[Market]):
     trades_data, live_data, kpi, markets_data = build_js_data(engine, markets)
 
     html = TEMPLATE_PATH.read_text(encoding="utf-8")
-    html = html.replace("__ASSETS__",  json.dumps(["BTC","ETH","SOL","XRP","BNB","DOGE","HYPE"]))
+    html = html.replace("__ASSETS__",  json.dumps(["BTC","ETH","SOL","XRP"]))
     html = html.replace("__TRADES__",  json.dumps(trades_data))
     html = html.replace("__LIVE__",    json.dumps(live_data))
     html = html.replace("__KPI__",     json.dumps(kpi))
